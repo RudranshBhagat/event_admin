@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import StatCard from '../../components/StatCard.jsx';
 import { validateTicket, getAdminStats, getPendingUpiOrders, approveUpiOrder, rejectUpiOrder, ApiError } from '../../lib/api.js';
+import jsQR from 'jsqr';
 
 export default function AdminScanner() {
   const navigate = useNavigate();
@@ -17,7 +18,6 @@ export default function AdminScanner() {
   const [manualId, setManualId] = useState('');
   const [scanning, setScanning] = useState(false);
   const [cameraError, setCameraError] = useState('');
-  const [jsQRLoaded, setJsQRLoaded] = useState(!!window.jsQR);
 
   const [pendingOrders, setPendingOrders] = useState([]);
   const [loadingPending, setLoadingPending] = useState(false);
@@ -59,24 +59,29 @@ export default function AdminScanner() {
     return () => clearInterval(id);
   }, [refreshStats, fetchPending]);
 
-  // Load jsQR from CDN
-  useEffect(() => {
-    if (window.jsQR) {
-      setJsQRLoaded(true);
-      return;
-    }
-    const script = document.createElement('script');
-    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.js';
-    script.onload = () => setJsQRLoaded(true);
-    document.body.appendChild(script);
-  }, []);
-
   async function startScanning() {
     setCameraError('');
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      if (window.isSecureContext === false) {
+        setCameraError('Camera access requires a secure connection (HTTPS or localhost). Please access this page via HTTPS or localhost.');
+      } else {
+        setCameraError('Camera API is not supported by your browser or device.');
+      }
+      return;
+    }
+
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment' },
-      });
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: 'environment' } },
+        });
+      } catch (err) {
+        // Fallback to any available video input if ideal facingMode fails
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+        });
+      }
       streamRef.current = stream;
       videoRef.current.srcObject = stream;
       await videoRef.current.play();
@@ -109,8 +114,8 @@ export default function AdminScanner() {
     ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
-    if (window.jsQR) {
-      const code = window.jsQR(imageData.data, imageData.width, imageData.height);
+    if (jsQR) {
+      const code = jsQR(imageData.data, imageData.width, imageData.height);
       if (code && code.data && code.data !== lastScanRef.current) {
         lastScanRef.current = code.data;
         handleScan(code.data);
@@ -223,11 +228,10 @@ export default function AdminScanner() {
                 {!scanning && (
                   <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
                     <p className="font-mono text-sm text-bone-500">
-                      {jsQRLoaded ? 'Camera is off' : 'Loading scanner…'}
+                      Camera is off
                     </p>
                     <button
                       onClick={startScanning}
-                      disabled={!jsQRLoaded}
                       className="btn-primary"
                     >
                       Start camera
